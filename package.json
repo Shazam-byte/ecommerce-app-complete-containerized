@@ -1,0 +1,37 @@
+{
+  "name": "catalog-backend",
+  "version": "1.0.0",
+  "description": "AWS EC2-ready decoupled Node.js Express REST API for E-Commerce Catalog",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch src/app.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "i": "^0.3.7",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.22.5",
+    "pg": "^8.11.5",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^22.14.0",
+    "@types/pg": "^8.11.5",
+    "nodemon": "^3.1.0",
+    "tsx": "^4.22.5",
+    "typescript": "^5.8.2"
+  }
+}
