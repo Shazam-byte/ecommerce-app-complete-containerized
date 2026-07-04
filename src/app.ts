@@ -25,6 +25,7 @@ const app = express();
 // Configure CORS to permit the decoupled frontend to speak to our endpoint
 app.use(cors({
   origin: [
+    'd3g7a1twk7q2ux.cloudfront.net',
     'http://ecommerce-frontend-shah.s3-website-us-east-1.amazonaws.com',
     'http://localhost:5173',
     'http://localhost:3000'
