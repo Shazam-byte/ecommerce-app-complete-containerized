@@ -15,72 +15,75 @@ export interface CartItem {
 export const CartModel = {
   async getByUserId(userId: number): Promise<CartItem[]> {
     const sql = `
-      SELECT ci.*, 
-             p.name as product_name, 
-             p.price as product_price, 
-             p.images as product_images, 
+      SELECT ci.*,
+             p.name as product_name,
+             p.price as product_price,
+             p.images as product_images,
              p.stock as product_stock
       FROM cart_items ci
       JOIN products p ON ci.product_id = p.id
-      WHERE ci.user_id = $1
+      WHERE ci.user_id = ?
       ORDER BY ci.created_at ASC
     `;
-    const res = await query<CartItem>(sql, [userId]);
-    return res.rows;
+    // Double-cast through unknown to override strict type overlap rules
+    const rows = (await query<any>(sql, [userId])) as unknown as any[];
+    return rows || [];
   },
 
   async addItem(userId: number, productId: number, quantity: number): Promise<CartItem> {
     const sql = `
       INSERT INTO cart_items (user_id, product_id, quantity)
-      VALUES ($1, $2, $3)
-      ON DUPLICATE KEY UPDATE quantity = quantity + $3
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE quantity = quantity + ?
     `;
-    await query(sql, [userId, productId, quantity]);
+    await query(sql, [userId, productId, quantity, quantity]);
+
     const fetchSql = `
-      SELECT ci.*, 
-             p.name as product_name, 
-             p.price as product_price, 
-             p.images as product_images, 
+      SELECT ci.*,
+             p.name as product_name,
+             p.price as product_price,
+             p.images as product_images,
              p.stock as product_stock
       FROM cart_items ci
       JOIN products p ON ci.product_id = p.id
-      WHERE ci.user_id = $1 AND ci.product_id = $2
+      WHERE ci.user_id = ? AND ci.product_id = ?
     `;
-    const res = await query<CartItem>(fetchSql, [userId, productId]);
-    return res.rows[0];
+    const rows = (await query<any>(fetchSql, [userId, productId])) as unknown as any[];
+    return rows[0];
   },
 
   async updateQuantity(itemId: number, userId: number, quantity: number): Promise<CartItem | null> {
     const sql = `
       UPDATE cart_items
-      SET quantity = $1
-      WHERE id = $2 AND user_id = $3
+      SET quantity = ?
+      WHERE id = ? AND user_id = ?
     `;
     await query(sql, [quantity, itemId, userId]);
+
     const fetchSql = `
-      SELECT ci.*, 
-             p.name as product_name, 
-             p.price as product_price, 
-             p.images as product_images, 
+      SELECT ci.*,
+             p.name as product_name,
+             p.price as product_price,
+             p.images as product_images,
              p.stock as product_stock
       FROM cart_items ci
       JOIN products p ON ci.product_id = p.id
-      WHERE ci.id = $1 AND ci.user_id = $2
+      WHERE ci.id = ? AND ci.user_id = ?
     `;
-    const res = await query<CartItem>(fetchSql, [itemId, userId]);
-    return res.rows[0] || null;
+    const rows = (await query<any>(fetchSql, [itemId, userId])) as unknown as any[];
+    return rows[0] || null;
   },
 
   async removeItem(itemId: number, userId: number): Promise<boolean> {
     const sql = `
       DELETE FROM cart_items
-      WHERE id = $1 AND user_id = $2
+      WHERE id = ? AND user_id = ?
     `;
-    const res = await query(sql, [itemId, userId]);
-    return res.rowCount > 0;
+    const result = (await query<any>(sql, [itemId, userId])) as unknown as any;
+    return result && result.affectedRows > 0;
   },
 
   async clearCart(userId: number): Promise<void> {
-    await query("DELETE FROM cart_items WHERE user_id = $1", [userId]);
+    await query("DELETE FROM cart_items WHERE user_id = ?", [userId]);
   }
 };
