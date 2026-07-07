@@ -32,7 +32,7 @@ app.use(cors({
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
 }))
 
 // Body parsers
@@ -109,7 +109,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 export default app;
 
-const PORT = process.env.PORT || 5000;
+const PORT =  parseInt(process.env.PORT || "5000", 10);
 app.listen(PORT, "0.0.0.0", () => {
 console.log('Server is listening on port ${PORT}');
 });

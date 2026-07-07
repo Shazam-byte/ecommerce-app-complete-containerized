@@ -25,6 +25,7 @@ export const CartModel = {
       WHERE ci.user_id = ?
       ORDER BY ci.created_at ASC
     `;
+
     // Double-cast through unknown to override strict type overlap rules
     const rows = (await query<any>(sql, [userId])) as unknown as any[];
     return rows || [];
@@ -36,6 +37,8 @@ export const CartModel = {
       VALUES (?, ?, ?)
       ON DUPLICATE KEY UPDATE quantity = quantity + ?
     `;
+
+    // We pass quantity twice because we have 4 total '?' placeholders
     await query(sql, [userId, productId, quantity, quantity]);
 
     const fetchSql = `
@@ -48,6 +51,7 @@ export const CartModel = {
       JOIN products p ON ci.product_id = p.id
       WHERE ci.user_id = ? AND ci.product_id = ?
     `;
+
     const rows = (await query<any>(fetchSql, [userId, productId])) as unknown as any[];
     return rows[0];
   },
@@ -70,6 +74,7 @@ export const CartModel = {
       JOIN products p ON ci.product_id = p.id
       WHERE ci.id = ? AND ci.user_id = ?
     `;
+
     const rows = (await query<any>(fetchSql, [itemId, userId])) as unknown as any[];
     return rows[0] || null;
   },
@@ -79,6 +84,7 @@ export const CartModel = {
       DELETE FROM cart_items
       WHERE id = ? AND user_id = ?
     `;
+
     const result = (await query<any>(sql, [itemId, userId])) as unknown as any;
     return result && result.affectedRows > 0;
   },
