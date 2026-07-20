@@ -50,6 +50,10 @@ export const CartController = {
       }
 
       const item = await CartModel.addItem(userId, productId, quantity);
+
+// DEBUG: This will print out exactly what is going to the frontend
+      console.log("=== DEBUG ADD ITEM RESPONSE ===", item);
+
       return res.status(201).json(item);
     } catch (err: any) {
       console.error("ADD_CART_ERR:", err);

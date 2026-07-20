@@ -45,6 +45,8 @@ exports.CartController = {
                 });
             }
             const item = await cart_model_1.CartModel.addItem(userId, productId, quantity);
+            // DEBUG: This will print out exactly what is going to the frontend
+            console.log("=== DEBUG ADD ITEM RESPONSE ===", item);
             return res.status(201).json(item);
         }
         catch (err) {
