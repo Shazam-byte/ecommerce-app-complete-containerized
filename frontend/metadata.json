@@ -1,0 +1,6 @@
+{
+  "name": "E-Commerce Catalog",
+  "description": "A separate-layer, multi-tier e-commerce catalog featuring product dynamic listings, categories, user carts, order placement simulations, reviews, and a robust admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
