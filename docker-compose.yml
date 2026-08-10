@@ -1,9 +1,8 @@
-version: '3.8'
-
 services:
   backend:
-    build: ./backend
+    image: shahzaman219/ecommerce-backend:latest
     container_name: ecommerce-backend
+    restart: always
     ports:
       - "5000:5000"
     environment:
@@ -13,10 +12,10 @@ services:
       - DB_NAME=ecommerce
       - DB_USER=root
       - DB_PASSWORD=rootpassword
-      - JWT_SECRET=your_jwt_secret_here
+      - JWT_SECRET=your_jwt_secret
       - AWS_REGION=us-east-1
       - S3_BUCKET_NAME=ecommerce-product-images-shah
-      - NODE_ENV=development
+      - NODE_ENV=production
     depends_on:
       mysql:
         condition: service_healthy
@@ -24,8 +23,9 @@ services:
       - ecommerce-network
 
   frontend:
-    build: ./frontend
+    image: shahzaman219/ecommerce-frontend:latest
     container_name: ecommerce-frontend
+    restart: always
     ports:
       - "80:80"
     depends_on:
@@ -36,6 +36,7 @@ services:
   mysql:
     image: mysql:8.0
     container_name: ecommerce-mysql
+    restart: always
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=ecommerce
@@ -43,6 +44,7 @@ services:
       - "3307:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
