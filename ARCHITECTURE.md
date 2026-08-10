@@ -27,27 +27,33 @@ This document explains the architectural decisions behind the AWS deployment of 
                         │               VPC: 10.0.0.0/16                              │
                         │                              │                              │
                         │   ┌──────────────────────────▼─────────────────────────┐   │
-                        │   │           Private Subnet — App Tier                │   │
-                        │   │         (ecommerce-private-1a / 1b)                │   │
+                        │   │           Public Subnet — EC2 Docker Host          │   │
                         │   │                                                    │   │
-                        │   │   ┌─────────────────┐   ┌─────────────────┐       │   │
-                        │   │   │ EC2 — Node.js   │   │ EC2 — Node.js   │       │   │
-                        │   │   │ backend (port   │   │ backend (port   │       │   │
-                        │   │   │ 5000) AZ-a      │   │ 5000) AZ-b      │       │   │
-                        │   │   └────────┬────────┘   └────────┬────────┘       │   │
-                        │   │            │   Auto Scaling Group │                │   │
-                        │   └────────────┼─────────────────────┼────────────────┘   │
-                        │                │                     │                    │
-                        │   ┌────────────▼─────────────────────▼────────────────┐   │
-                        │   │           Private Subnet — Data Tier              │   │
-                        │   │         (ecommerce-private-1a / 1b)               │   │
-                        │   │                                                   │   │
-                        │   │   ┌─────────────────┐   ┌─────────────────┐      │   │
-                        │   │   │  RDS MySQL 8.0  │   │  S3 — Product   │      │   │
-                        │   │   │  (port 3306)    │   │  Images Bucket  │      │   │
-                        │   │   └─────────────────┘   └─────────────────┘      │   │
-                        │   └───────────────────────────────────────────────────┘   │
-                        └─────────────────────────────────────────────────────────  ┘
+                        │   │   ┌─────────────────────────────────────────────┐  │   │
+                        │   │   │            Docker Compose Stack             │  │   │
+                        │   │   │                                             │  │   │
+                        │   │   │  ┌──────────────┐   ┌──────────────────┐   │  │   │
+                        │   │   │  │   frontend   │   │    backend       │   │  │   │
+                        │   │   │  │  nginx:80    │   │  node.js:5000    │   │  │   │
+                        │   │   │  └──────────────┘   └────────┬─────────┘   │  │   │
+                        │   │   │                              │             │  │   │
+                        │   │   │              ┌───────────────┤             │  │   │
+                        │   │   │              ▼               ▼             │  │   │
+                        │   │   │  ┌──────────────────┐  S3 images bucket   │  │   │
+                        │   │   │  │  mysql:3306       │  (via IAM role)     │  │   │
+                        │   │   │  └──────────────────┘                     │  │   │
+                        │   │   └─────────────────────────────────────────┘  │   │
+                        │   └────────────────────────────────────────────────┘   │
+                        │                              │                          │
+                        │   ┌──────────────────────────▼─────────────────────┐   │
+                        │   │           Private Subnet — Data Tier           │   │
+                        │   │                                                │   │
+                        │   │   ┌─────────────────┐                         │   │
+                        │   │   │  RDS MySQL 8.0  │                         │   │
+                        │   │   │  (port 3306)    │                         │   │
+                        │   │   └─────────────────┘                         │   │
+                        │   └────────────────────────────────────────────────┘   │
+                        └─────────────────────────────────────────────────────── ┘
 ```
 
 ---
@@ -62,133 +68,159 @@ This document explains the architectural decisions behind the AWS deployment of 
 
 ---
 
-## Decision 2 — Why Public and Private Subnets
+## Decision 2 — Why Docker on EC2
+
+**What it is:** Instead of installing Node.js directly on EC2 and managing it with PM2, the entire application stack runs inside Docker containers orchestrated by Docker Compose.
+
+**Why Docker over raw installation:**
+
+| | Raw install + PM2 | Docker |
+|---|---|---|
+| Environment consistency | "Works on my machine" problem | Identical environment everywhere |
+| Deployment | SSH in, git pull, restart PM2 | Pull new image, restart container |
+| Rollback | Hard — requires git reset | Easy — pull previous image tag |
+| Local dev | Install everything locally | docker compose up |
+| CI/CD integration | Script-heavy | Native image build and push |
+
+**Why Docker Compose over standalone containers:** Three services need to talk to each other — backend needs MySQL, frontend needs backend. Compose handles networking, startup order, and health checks automatically. Backend waits for MySQL to be healthy before starting. All services share a private Docker network — MySQL port is never exposed to the internet.
+
+---
+
+## Decision 3 — Why Public and Private Subnets
 
 The VPC has four subnets: two public, two private.
 
 **Public subnets** (`10.0.1.0/24`, `10.0.2.0/24`) contain:
 - Application Load Balancer
-- NAT Gateway (if added later)
+- EC2 Docker host
 
-These need internet access — the ALB receives traffic from users, so it must be in a public subnet with a route to the Internet Gateway.
+These need internet access — the ALB receives traffic from users, the EC2 needs to pull Docker images from Docker Hub.
 
 **Private subnets** (`10.0.3.0/24`, `10.0.4.0/24`) contain:
-- EC2 instances (backend)
-- RDS MySQL (database)
+- RDS MySQL
 
-These have no route to the internet. The EC2 instances only receive traffic from the ALB. The database only receives traffic from EC2. This means even if someone found your EC2's private IP, they couldn't reach it directly from outside the VPC — and the database is completely unreachable from anywhere except the app tier.
+The database has no route to the internet. Even if someone knew the RDS endpoint, they couldn't connect — there is no network path to it from outside the VPC.
 
-**Why 2 Availability Zones:** AWS data centers are grouped into AZs. If one AZ goes down, your app keeps running in the other. ALB requires subnets in at least 2 AZs to distribute traffic. RDS multi-AZ failover also requires 2 AZs.
+**Why 2 Availability Zones:** If one AWS data center goes down, traffic routes to the other. ALB requires subnets in at least 2 AZs to distribute traffic.
 
 ---
 
-## Decision 3 — Why ALB Instead of Direct EC2 Access
+## Decision 4 — Why ALB Instead of Direct EC2 Access
 
-Without an ALB, users would hit the EC2 instance directly. Problems with that:
-
-- Single point of failure — if EC2 crashes, app goes down
-- Can't scale horizontally — one IP means one server
-- EC2's public IP changes every time it stops and starts
-- Port 5000 exposed directly to the internet is a security smell
+Without an ALB, users hit the EC2 instance directly. Problems:
+- Single point of failure — EC2 crashes, app goes down
+- EC2 public IP changes every restart
+- Port 5000 directly exposed to internet
 
 With the ALB:
-- Traffic is distributed across multiple EC2 instances
-- ALB has a stable DNS name that never changes
-- EC2 security group only accepts traffic from the ALB — port 5000 is never exposed to the internet
-- Health checks automatically route away from unhealthy instances
+- Stable DNS name that never changes
+- EC2 security group only accepts traffic from ALB — port 5000 never exposed
+- Health checks automatically stop routing to unhealthy instances
+- Ready for horizontal scaling — add more EC2 instances to the target group
 
 ---
 
-## Decision 4 — Why RDS Instead of MySQL on EC2
+## Decision 5 — Why RDS Instead of MySQL in Docker
 
-You could install MySQL directly on the EC2 instance. It would work. But:
+MySQL runs inside Docker Compose for local development. In production, RDS is used instead.
 
-| | MySQL on EC2 | RDS MySQL |
+| | MySQL in Docker | RDS MySQL |
 |---|---|---|
 | Backups | Manual | Automated |
 | Failover | Manual setup | Multi-AZ automatic |
 | Patching | You manage | AWS manages |
+| Data persistence | Volume management | Managed storage |
 | Monitoring | You set up | CloudWatch built-in |
-| Storage scaling | Manual | Automatic |
 
-RDS costs more but removes the operational burden. For a production application, the time saved managing a database outweighs the cost difference. This is the exact tradeoff the SAA-C03 exam tests.
-
----
-
-## Decision 5 — Why RDS is in a Private Subnet With No Public Access
-
-The database contains user data, order history, and hashed passwords. There is no scenario where it should be reachable from the internet.
-
-Setting `Public access: No` on RDS means AWS does not assign it a public IP. Even if someone knew the endpoint, they couldn't connect — there is no network route to it from outside the VPC.
-
-The only inbound rule on `ecommerce-rds-sg` is:
-```
-Port 3306 — Source: ecommerce-ec2-sg
-```
-
-Not even you can connect to it directly from your laptop. To query the database directly you would need to SSH into EC2 first and connect from there (SSH tunneling).
+For production, the operational reliability of RDS outweighs the cost. The Docker MySQL is intentionally kept for local development only.
 
 ---
 
-## Decision 6 — Why S3 + CloudFront for the Frontend
+## Decision 6 — Why RDS is in a Private Subnet
 
-**Why not serve frontend from EC2:** EC2 is good at running dynamic backend logic. Serving static HTML/CSS/JS from EC2 wastes compute resources on something S3 does for almost nothing.
+The database contains user data, order history, and hashed passwords. No scenario exists where it should be reachable from the internet.
 
-**Why S3:** Purpose-built for static file storage and serving. Infinitely scalable, 99.99% availability, essentially free at any reasonable traffic level.
+The only inbound rule on `ecommerce-rds-sg`:
+```
+Port 3306 — Source: ecommerce-ec2-sg only
+```
 
-**Why CloudFront in front of S3:**
-- S3 website hosting only supports HTTP, not HTTPS. CloudFront adds HTTPS automatically.
-- CloudFront caches files at edge locations globally — a user in Pakistan gets files served from a nearby edge location, not from us-east-1 every time.
-- CloudFront provides DDoS protection via AWS Shield Standard at no extra cost.
-- The S3 bucket URL is ugly. CloudFront gives a cleaner URL and supports custom domains.
+Not even a direct connection from your laptop is possible. To query it directly you would need to SSH into EC2 first and connect from there.
 
 ---
 
-## Decision 7 — Why IAM Role Instead of Access Keys for S3 Upload
+## Decision 7 — Why S3 + CloudFront for the Frontend
 
-The backend uploads product images to S3 using the AWS SDK. Two ways to authenticate:
+**Why not serve frontend from EC2:** The frontend container on EC2 exists for local development parity. In production, serving static files from S3 + CloudFront is cheaper, faster, and more reliable than EC2.
 
-**Option A — Access keys in .env:**
-```
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
-```
-
-Bad. If the `.env` file ever gets committed to GitHub accidentally, those keys are compromised instantly. Bots scan GitHub for AWS credentials 24/7.
-
-**Option B — IAM instance role:**
-Attach a role to the EC2 instance with S3 permissions. The AWS SDK automatically picks up the role's credentials from the instance metadata service — no keys in code, no keys in `.env`, nothing to leak.
-
-The IAM role (`ecommerce-ec2-s3-role`) has only `AmazonS3FullAccess`. In a production setup you would scope this further to only the specific bucket using a custom inline policy.
+**Why CloudFront:**
+- S3 website hosting is HTTP only — CloudFront adds HTTPS automatically
+- Files cached at global edge locations — faster for users everywhere
+- DDoS protection via AWS Shield Standard at no extra cost
+- Custom error pages fix React Router — 403/404 returns `index.html` with 200
 
 ---
 
-## Decision 8 — Security Group Layering
+## Decision 8 — Why IAM Role Instead of Access Keys
 
-Each tier only accepts traffic from the tier directly above it:
+The backend uploads product images to S3. Two ways to authenticate:
+
+**Access keys in .env:** If `.env` is ever committed to GitHub accidentally, those keys are compromised instantly. Bots scan GitHub for AWS credentials 24/7.
+
+**IAM instance role:** EC2 gets an attached role with S3 permissions. The AWS SDK picks up credentials from the instance metadata service automatically — no keys in code, no keys in `.env`, nothing to leak.
+
+---
+
+## Decision 9 — Why GitHub Actions for CI/CD
+
+Every push to `main` should deploy automatically. Manual deployment (SSH in, git pull, restart) is error-prone and doesn't scale.
+
+GitHub Actions was chosen over alternatives because:
+- Native GitHub integration — no separate CI server to maintain
+- Free for public repos
+- Direct Docker Hub integration via official actions
+- SSH deployment via `appleboy/ssh-action` — battle-tested, well documented
+- Secrets management built in — no credentials ever in code
+
+**Pipeline flow:**
+```
+push to main
+  → checkout code
+  → build backend image
+  → build frontend image
+  → push both to Docker Hub
+  → SSH into EC2
+  → git pull latest repo
+  → docker compose pull (new images)
+  → docker compose up -d (restart with new images)
+  → docker image prune (clean up old images)
+```
+
+---
+
+## Security Group Layering
 
 ```
-ecommerce-alb-sg   → allows 80/443 from 0.0.0.0/0 (internet)
+ecommerce-alb-sg   → allows 80/443 from 0.0.0.0/0
 ecommerce-ec2-sg   → allows 5000 from ecommerce-alb-sg only
+                   → allows 22 from 0.0.0.0/0 (required for CI/CD SSH)
 ecommerce-rds-sg   → allows 3306 from ecommerce-ec2-sg only
 ```
 
-This is called defense in depth. Even if the ALB were somehow compromised, it still couldn't hit the database directly — it can only reach EC2, and EC2 is the only thing that can reach RDS.
+Defense in depth — every layer only accepts traffic from the layer directly above it.
 
 ---
 
 ## What Would Change in Production at Scale
 
-This deployment is sized for portfolio/demo purposes. At real scale:
-
 | Component | Current | Production |
 |---|---|---|
-| EC2 | t2.micro, 1 instance | t3.medium+, 3-10 instances in ASG |
+| EC2 | t2.micro, 1 instance | t3.medium+, Auto Scaling Group |
 | RDS | t3.micro, single AZ | r6g.large, Multi-AZ enabled |
-| S3 images | Public bucket | Private bucket + CloudFront signed URLs |
-| HTTPS on ALB | Not configured | ACM certificate on ALB listener |
-| Secrets | .env file on EC2 | AWS Secrets Manager |
-| Logging | PM2 logs | CloudWatch Logs agent on EC2 |
-| CI/CD | Manual git pull | GitHub Actions → CodeDeploy |
-| NAT Gateway | Not added | Required for EC2 to pull updates |
-| WAF | Not configured | AWS WAF in front of CloudFront |
+| Docker | Compose on single EC2 | Kubernetes (EKS) |
+| CI/CD | GitHub Actions → EC2 | GitHub Actions → ECR → EKS |
+| Images | Docker Hub (public) | AWS ECR (private) |
+| Secrets | .env in compose file | AWS Secrets Manager |
+| Logging | Docker logs | CloudWatch Logs agent |
+| HTTPS on ALB | Not configured | ACM certificate |
+| SSH port | Open to world | AWS Systems Manager Session Manager |

@@ -1,10 +1,11 @@
 # E-Commerce Catalog — AWS Multi-Tier Deployment
 
-A full-stack e-commerce catalog application deployed on AWS using a three-tier architecture. Built as a portfolio project demonstrating real-world cloud infrastructure design, network security, and AWS service integration.
+A full-stack e-commerce catalog application deployed on AWS using a three-tier architecture. Built as a portfolio project demonstrating real-world cloud infrastructure design, containerization, CI/CD automation, and AWS service integration.
 
-**Live Demo:** https://d3g7a1twk7q2ux.cloudfront.net/
+**Live Demo:** https://dxxxxxxxxxxxx.cloudfront.net  
+**Docker Hub:** https://hub.docker.com/u/shahzaman219
 
-\---
+---
 
 ## Architecture Overview
 
@@ -19,70 +20,93 @@ CloudFront (HTTPS, CDN, global edge caching)
     └──▶ Application Load Balancer (public subnet, port 80)
               │
               ▼
-         EC2 — Node.js backend (private subnet, port 5000)
-         Auto Scaling Group (min 1, max 4)
+         EC2 — Docker Host (public subnet)
+         ├── ecommerce-frontend container (nginx, port 80)
+         ├── ecommerce-backend container (Node.js, port 5000)
+         └── ecommerce-mysql container (MySQL 8.0, port 3306)
               │
               ├──▶ RDS MySQL (private subnet, port 3306)
               │
               └──▶ S3 (product images bucket)
+
+All resources inside custom VPC (10.0.0.0/16)
+Public subnets: ALB, EC2
+Private subnets: RDS MySQL
 ```
 
-**VPC design:** All resources live inside a custom VPC (`10.0.0.0/16`) with public and private subnets across 2 Availability Zones. The database sits in a private subnet with no internet route — the only thing that can reach it is the EC2 backend via a locked-down security group rule.
+---
 
-\---
+## CI/CD Pipeline
+
+Every push to `main` triggers the automated pipeline:
+
+```
+git push → GitHub Actions
+    → Build backend Docker image
+    → Build frontend Docker image
+    → Push both images to Docker Hub
+    → SSH into EC2
+    → Pull latest images
+    → Restart containers
+    → Zero manual steps
+```
+
+---
 
 ## AWS Services Used
 
-|Service|Purpose|
-|-|-|
-|VPC|Isolated network with public/private subnet separation|
-|EC2 (t2.micro)|Runs the Node.js/Express REST API|
-|Application Load Balancer|Distributes traffic to EC2, single public entry point|
-|Auto Scaling Group|Maintains availability, replaces unhealthy instances|
-|RDS MySQL (t3.micro)|Managed relational database in private subnet|
-|S3 (images)|Stores and serves product images publicly|
-|S3 (frontend)|Hosts the React static build|
-|CloudFront|CDN + HTTPS in front of the frontend S3 bucket|
-|IAM|EC2 instance role for S3 access — no hardcoded credentials|
-|Security Groups|Layered traffic control at every tier|
+| Service | Purpose |
+|---|---|
+| VPC | Isolated network with public/private subnet separation |
+| EC2 (t2.micro) | Docker host running all application containers |
+| Application Load Balancer | Distributes traffic to EC2, single public entry point |
+| RDS MySQL (t3.micro) | Managed relational database in private subnet |
+| S3 (images) | Stores and serves product images publicly |
+| S3 (frontend) | Hosts the React static build |
+| CloudFront | CDN + HTTPS in front of the frontend S3 bucket |
+| IAM | EC2 instance role for S3 access — no hardcoded credentials |
+| Security Groups | Layered traffic control at every tier |
 
-\---
+---
 
 ## Tech Stack
 
 **Frontend**
-
-* React + Vite
-* Tailwind CSS
-* Hosted on S3 + CloudFront
+- React + Vite
+- Tailwind CSS
+- Nginx (inside Docker container)
+- Hosted on S3 + CloudFront
 
 **Backend**
-
-* Node.js + Express
-* JWT authentication (httpOnly cookies)
-* bcrypt password hashing
-* AWS SDK v3 for S3 image uploads
-* Hosted on EC2 behind ALB
+- Node.js + Express
+- JWT authentication (httpOnly cookies)
+- bcrypt password hashing
+- AWS SDK v3 for S3 image uploads
+- Hosted on EC2 inside Docker container
 
 **Database**
+- MySQL 8.0
+- Hosted on RDS in private subnet
+- Raw SQL via `mysql2` (no ORM)
 
-* MySQL 8.0
-* Hosted on RDS in private subnet
-* Raw SQL via `mysql2` (no ORM)
+**DevOps**
+- Docker + Docker Compose
+- GitHub Actions (CI/CD)
+- Docker Hub (image registry)
 
-\---
+---
 
 ## Features
 
-* Product catalog with pagination, category filter, price range filter, and search
-* Product detail page with image gallery and related products
-* Cart with persistent storage per user in the database
-* Multi-step checkout (shipping → review → mock payment → confirmation)
-* JWT-based auth — register, login, logout
-* Admin panel (role-based access) — CRUD for products, categories, order management
-* Product reviews — star rating + text, average rating displayed on catalog
+- Product catalog with pagination, category filter, price range filter, and search
+- Product detail page with image gallery and related products
+- Cart with persistent storage per user in the database
+- Multi-step checkout (shipping → review → mock payment → confirmation)
+- JWT-based auth — register, login, logout
+- Admin panel (role-based access) — CRUD for products, categories, order management
+- Product reviews — star rating + text, average rating displayed on catalog
 
-\---
+---
 
 ## Security Design
 
@@ -94,142 +118,117 @@ EC2       →  S3 via IAM role (no access keys in code)
 RDS       →  unreachable from internet
 ```
 
-No hardcoded AWS credentials anywhere in the codebase. EC2 accesses S3 via an attached IAM instance role — the AWS SDK picks up permissions automatically.
+---
 
-\---
-
-## Running with Docker
+## Running Locally with Docker
 
 Make sure Docker and Docker Compose are installed.
 
-\```bash
-
+```bash
 git clone https://github.com/Shazam-byte/ecommerce-app-complete-containerized.git
+cd ecommerce-app-complete-containerized
+docker compose up --build
+```
 
-cd ecommerce-app-complete-containerized-main
+Open `http://localhost` in your browser.
 
-docker-compose up --build
+To stop:
+```bash
+docker compose down
+```
 
-\```
+To stop and wipe the database:
+```bash
+docker compose down -v
+```
 
-Open http://localhost in your browser.
+---
 
-## Local Development
+## Running Locally without Docker
 
 ### Prerequisites
+- Node.js 20+
+- MySQL 8.0 running locally
 
-* Node.js 20+
-* MySQL 8.0 running locally
-* Git
-
-### Backend setup
-
+### Backend
 ```bash
 cd backend
 npm install
 cp .env.example .env
-# Fill in your local values in .env
-npm run migrate
+# fill in your local values
+node migrate.js
 npm run dev
 ```
 
-### Frontend setup
-
+### Frontend
 ```bash
 cd frontend
 npm install
 cp .env.example .env
-# Set VITE\_API\_URL=http://localhost:5000
+# set VITE_API_URL=http://localhost:5000
 npm run dev
 ```
 
-\---
+---
 
 ## Environment Variables
 
 ### Backend `.env`
-
 ```
 PORT=5000
-DB\_HOST=localhost
-DB\_PORT=3306
-DB\_NAME=ecommerce
-DB\_USER=root
-DB\_PASSWORD=yourpassword
-JWT\_SECRET=your\_long\_random\_secret
-AWS\_REGION=us-east-1
-S3\_BUCKET\_NAME=ecommerce-product-images-shah
-NODE\_ENV=development
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=ecommerce
+DB_USER=root
+DB_PASSWORD=yourpassword
+JWT_SECRET=your_long_random_secret
+AWS_REGION=us-east-1
+S3_BUCKET_NAME=ecommerce-product-images-shah
+NODE_ENV=development
 ```
 
 ### Frontend `.env`
-
 ```
-VITE\_API\_URL=http://localhost:5000
+VITE_API_URL=http://localhost:5000
 ```
 
-In production, `VITE\_API\_URL` points to the ALB DNS name.
-
-\---
+---
 
 ## Database Schema
 
 ```
-users           — id, name, email, password\_hash, role, created\_at
+users           — id, name, email, password_hash, role, created_at
 categories      — id, name, slug, description
-products        — id, name, slug, description, price, stock, category\_id, created\_at
-product\_images  — id, product\_id, image\_url, is\_primary
-cart\_items      — id, user\_id, product\_id, quantity
-orders          — id, user\_id, status, total, shipping\_address, created\_at
-order\_items     — id, order\_id, product\_id, quantity, price\_at\_purchase
-reviews         — id, user\_id, product\_id, rating, comment, created\_at
+products        — id, name, slug, description, price, stock, category_id, created_at
+product_images  — id, product_id, image_url, is_primary
+cart_items      — id, user_id, product_id, quantity
+orders          — id, user_id, status, total, shipping_address, created_at
+order_items     — id, order_id, product_id, quantity, price_at_purchase
+reviews         — id, user_id, product_id, rating, comment, created_at
 ```
 
-\---
+---
 
-## API Endpoints
+## Docker Hub Images
 
-|Method|Route|Auth|Purpose|
-|-|-|-|-|
-|POST|/api/auth/register|No|Register new user|
-|POST|/api/auth/login|No|Login, sets JWT cookie|
-|POST|/api/auth/logout|Yes|Clears JWT cookie|
-|GET|/api/products|No|List products (filter, search, paginate)|
-|GET|/api/products/:id|No|Product detail|
-|GET|/api/categories|No|List all categories|
-|POST|/api/cart|Yes|Add item to cart|
-|GET|/api/cart|Yes|Get current user's cart|
-|PUT|/api/cart/:id|Yes|Update cart item quantity|
-|DELETE|/api/cart/:id|Yes|Remove cart item|
-|POST|/api/orders|Yes|Place order|
-|GET|/api/orders|Yes|Get current user's orders|
-|POST|/api/reviews|Yes|Submit a review|
-|GET|/api/reviews/:productId|No|Get reviews for a product|
-|GET|/api/admin/products|Admin|List all products|
-|POST|/api/admin/products|Admin|Create product with image upload|
-|PUT|/api/admin/products/:id|Admin|Update product|
-|DELETE|/api/admin/products/:id|Admin|Delete product|
-|GET|/api/admin/orders|Admin|List all orders|
-|PUT|/api/admin/orders/:id|Admin|Update order status|
-|GET|/api/health|No|Health check (used by ALB)|
+| Image | Link |
+|---|---|
+| Backend | https://hub.docker.com/r/shahzaman219/ecommerce-backend |
+| Frontend | https://hub.docker.com/r/shahzaman219/ecommerce-frontend |
 
-\---
+---
 
-## Deployment
+## Documentation
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for the full step-by-step AWS deployment guide.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — design decisions and architectural reasoning
+- [DEPLOYMENT.md](./DEPLOYMENT.md) — full step-by-step AWS deployment guide
+- [COST.md](./COST.md) — monthly cost breakdown
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for design decisions and architectural reasoning.
-
-See [COST.md](./COST.md) for monthly cost breakdown.
-
-\---
+---
 
 ## Author
 
 **Shahzaman Ajmal**
-
-* GitHub: [github.com/Shazam-byte](https://github.com/Shazam-byte)
-* LinkedIn: [linkedin.com/in/shahzaman-ajmal](https://linkedin.com/in/shahzaman-ajmal)
-* Portfolio: [https://portfolio-ebon-beta-49.vercel.app/](https://portfolio-mu-lemon-24.vercel.app)
-
+- GitHub: [github.com/Shazam-byte](https://github.com/Shazam-byte)
+- LinkedIn: [linkedin.com/in/shahzaman-ajmal](https://linkedin.com/in/shahzaman-ajmal)
+- Portfolio: [portfolio-mu-lemon-24.vercel.app](https://portfolio-mu-lemon-24.vercel.app)
